@@ -9,50 +9,35 @@ interface ChatMessage {
   timestamp: number;
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  nexus: '#4dabf7',
-  junior: '#22d3ee',
-  bgv: '#00d97e',
+const AGENT_META: Record<string, { icon: string; color: string }> = {
+  nexus:  { icon: '⬡', color: '#58a6ff' },
+  junior: { icon: '◈', color: '#39d3c3' },
+  bgv:    { icon: '◉', color: '#3fb950' },
+  felix:  { icon: '●', color: '#e3b341' },
 };
 
-const AGENT_ICONS: Record<string, string> = {
-  nexus: '⬡',
-  junior: '◈',
-  bgv: '◉',
+const TYPE_STYLES: Record<string, { color: string; bg: string }> = {
+  insight: { color: '#3fb950', bg: '#1a4427' },
+  idea:    { color: '#f0883e', bg: '#3d1f00' },
+  status:  { color: '#4d5566', bg: '#21262d' },
+  question:{ color: '#e3b341', bg: '#3a2e00' },
+  task:    { color: '#58a6ff', bg: '#1a2f4d' },
+  message: { color: '#8b949e', bg: '#21262d' },
 };
 
-function agentColor(name: string): string {
-  return AGENT_COLORS[name?.toLowerCase()] || '#c8d8f0';
-}
-
-function agentIcon(name: string): string {
-  return AGENT_ICONS[name?.toLowerCase()] || '◌';
+function agentMeta(name: string) {
+  return AGENT_META[name?.toLowerCase()] || { icon: '◌', color: '#8b949e' };
 }
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-US', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    hour12: false, hour: '2-digit', minute: '2-digit',
   });
-}
-
-function typeColor(type: string): string {
-  const map: Record<string, string> = {
-    status: '#4a5568',
-    idea: '#fb923c',
-    question: '#ffc107',
-    insight: '#00d97e',
-    task: '#4dabf7',
-    message: '#c8d8f0',
-  };
-  return map[type] || '#c8d8f0';
 }
 
 async function fetchMessages(): Promise<ChatMessage[]> {
   try {
-    const res = await fetch('/api/chat?limit=50');
+    const res = await fetch('/api/chat?limit=60');
     if (!res.ok) return [];
     return await res.json();
   } catch {
@@ -64,20 +49,21 @@ export default function ChatFeed() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMsg, setNewMsg] = useState('');
   const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const wasAtBottom = useRef(true);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchMessages().then(setMessages);
+    fetchMessages().then(msgs => setMessages(msgs));
     const interval = setInterval(() => {
-      fetchMessages().then(setMessages);
+      fetchMessages().then(msgs => setMessages(msgs));
     }, 5000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    // Auto-scroll to bottom (newest messages)
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (wasAtBottom.current) {
+      endRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
 
@@ -99,96 +85,122 @@ export default function ChatFeed() {
     }
   };
 
-  // Display in chronological order (oldest first at top)
   const chronological = [...messages].reverse();
 
   return (
-    <div className="panel flex flex-col" style={{ height: '200px' }}>
-      <div className="panel-header flex-shrink-0">
-        <span className="panel-header-title">⬡ Agent Team Channel</span>
-        <span className="val-dim">{messages.length} messages</span>
+    <div
+      className="panel"
+      style={{ height: '180px', flexShrink: 0, borderRadius: '8px' }}
+    >
+      <div className="panel-header" style={{ padding: '8px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '14px' }}>⬡</span>
+          <span className="panel-title">Agent Team Channel</span>
+        </div>
+        <span className="panel-badge">{messages.length}</span>
       </div>
 
-      {/* Message feed */}
-      <div className="flex-1 overflow-y-auto px-3 py-1" style={{ fontSize: '11px' }}>
+      {/* Feed */}
+      <div
+        ref={containerRef}
+        style={{ flex: 1, overflowY: 'auto', padding: '8px 14px' }}
+        onScroll={() => {
+          const el = containerRef.current;
+          if (el) wasAtBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+        }}
+      >
         {chronological.length === 0 ? (
-          <div className="text-center py-4 val-dim" style={{ fontSize: '10px' }}>
-            No messages yet. Agents will post here proactively.
+          <div style={{ textAlign: 'center', padding: '16px', color: '#4d5566', fontSize: '12px' }}>
+            No messages yet — agents will post here proactively on heartbeats
           </div>
         ) : (
           chronological.map(msg => {
-            const color = msg.from === 'felix' ? '#d4c89a' : agentColor(msg.from);
-            const icon = msg.from === 'felix' ? '●' : agentIcon(msg.from);
-            const tc = typeColor(msg.type);
-
+            const meta = agentMeta(msg.from);
+            const ts = TYPE_STYLES[msg.type] || TYPE_STYLES.message;
             return (
-              <div key={msg.id} className="flex items-start gap-2 py-1 border-b border-terminal-border">
-                {/* Timestamp */}
-                <span className="val-dim flex-shrink-0" style={{ fontSize: '9px', marginTop: '2px', width: '52px' }}>
+              <div
+                key={msg.id}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: '10px',
+                  padding: '4px 0', borderBottom: '1px solid #21262d',
+                }}
+              >
+                {/* Time */}
+                <span className="mono" style={{ fontSize: '10px', color: '#4d5566', flexShrink: 0, marginTop: '2px', width: '40px' }}>
                   {formatTime(msg.timestamp)}
                 </span>
 
-                {/* From */}
-                <span
-                  className="flex-shrink-0 font-bold uppercase"
-                  style={{ color, fontSize: '10px', width: '52px' }}
-                >
-                  {icon} {msg.from}
-                </span>
-
-                {/* To (if not 'all') */}
-                {msg.to !== 'all' && (
-                  <span className="val-dim flex-shrink-0" style={{ fontSize: '9px', marginTop: '2px' }}>
-                    →{msg.to}
+                {/* Sender */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, width: '64px' }}>
+                  <span style={{ color: meta.color, fontSize: '11px' }}>{meta.icon}</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: meta.color, textTransform: 'capitalize' }}>
+                    {msg.from}
                   </span>
-                )}
+                </div>
 
                 {/* Type badge */}
                 {msg.type !== 'message' && (
-                  <span
-                    className="flex-shrink-0 px-1 rounded"
-                    style={{ fontSize: '8px', color: tc, background: `${tc}22`, marginTop: '1px' }}
-                  >
-                    {msg.type.toUpperCase()}
+                  <span style={{
+                    fontSize: '9px', fontWeight: 600, letterSpacing: '0.04em',
+                    color: ts.color, background: ts.bg,
+                    padding: '1px 6px', borderRadius: '3px', flexShrink: 0, marginTop: '2px',
+                    textTransform: 'uppercase',
+                  }}>
+                    {msg.type}
                   </span>
                 )}
 
                 {/* Message */}
-                <span className="flex-1 text-terminal-text" style={{ lineHeight: '1.5' }}>
+                <span style={{ fontSize: '12px', color: '#c9d1d9', lineHeight: '1.5', flex: 1 }}>
+                  {msg.to !== 'all' && (
+                    <span style={{ color: '#4d5566', marginRight: '4px' }}>→{msg.to}</span>
+                  )}
                   {msg.message}
                 </span>
               </div>
             );
           })
         )}
-        <div ref={bottomRef} />
+        <div ref={endRef} />
       </div>
 
-      {/* Input bar — Felix can inject into the channel */}
+      {/* Input */}
       <form
         onSubmit={sendMessage}
-        className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 border-t border-terminal-border"
-        style={{ background: '#04060e' }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '7px 14px',
+          borderTop: '1px solid #30363d',
+          background: '#0d1117',
+          flexShrink: 0,
+        }}
       >
-        <span className="val-dim" style={{ fontSize: '10px' }}>
-          ● FELIX →
+        <span style={{ fontSize: '11px', color: '#e3b341', fontWeight: 600, flexShrink: 0 }}>
+          ● Felix
         </span>
+        <span style={{ color: '#4d5566', fontSize: '11px' }}>→ all</span>
         <input
           type="text"
           value={newMsg}
           onChange={e => setNewMsg(e.target.value)}
-          placeholder="Broadcast to agent team..."
-          className="flex-1 bg-transparent text-terminal-text outline-none"
-          style={{ fontSize: '11px', caretColor: '#4dabf7' }}
+          placeholder="Broadcast to agent team…"
+          style={{
+            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            fontSize: '12px', color: '#e6edf3', caretColor: '#58a6ff',
+          }}
           disabled={sending}
         />
         <button
           type="submit"
           disabled={!newMsg.trim() || sending}
-          className="val-blue hover:text-white disabled:val-dim"
-          style={{ fontSize: '10px' }}
+          style={{
+            fontSize: '11px', fontWeight: 600,
+            color: newMsg.trim() ? '#58a6ff' : '#4d5566',
+            background: 'none', border: 'none', cursor: newMsg.trim() ? 'pointer' : 'default',
+            flexShrink: 0,
+          }}
         >
-          SEND ↵
+          Send ↵
         </button>
       </form>
     </div>

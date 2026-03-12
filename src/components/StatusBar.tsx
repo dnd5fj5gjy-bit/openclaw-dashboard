@@ -15,70 +15,84 @@ function Clock() {
     return () => clearInterval(t);
   }, []);
   return (
-    <span className="text-terminal-text font-mono">
-      {time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+    <span className="mono" style={{ fontSize: '12px', color: '#8b949e' }}>
+      {time.toLocaleTimeString('en-US', { hour12: false })}
       {' '}
-      <span className="val-dim">PDT</span>
+      <span style={{ color: '#4d5566' }}>PDT</span>
     </span>
   );
 }
 
 export default function StatusBar({ agents, health, connected, lastRefresh }: Props) {
   const activeCount = agents.filter(a => a.status === 'active').length;
-  const idleCount = agents.filter(a => a.status === 'idle').length;
   const totalSessions = health?.sessions ?? 0;
 
   return (
     <div
-      className="flex items-center justify-between px-3 border-b border-terminal-border flex-shrink-0"
-      style={{ background: '#04060e', height: '32px', fontSize: '11px' }}
+      style={{
+        height: '44px',
+        background: '#161b22',
+        borderBottom: '1px solid #30363d',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 16px',
+        flexShrink: 0,
+      }}
     >
-      {/* Left: branding */}
-      <div className="flex items-center gap-4">
-        <span className="font-bold text-terminal-blue tracking-widest" style={{ fontSize: '12px' }}>
-          ⬡ NEXUS COMMAND
-        </span>
-        <div className="flex items-center gap-1">
+      {/* Left */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '15px', color: '#58a6ff' }}>⬡</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#e6edf3', letterSpacing: '-0.01em' }}>
+            Nexus Command
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span
-            className={`w-1.5 h-1.5 rounded-full inline-block ${connected ? 'bg-terminal-green' : 'bg-terminal-red'}`}
-            style={{ animation: connected ? 'pulse 2s infinite' : 'none' }}
+            className="dot"
+            style={{
+              background: connected ? '#3fb950' : '#f85149',
+              boxShadow: connected ? '0 0 6px rgba(63,185,80,0.6)' : 'none',
+            }}
           />
-          <span className={connected ? 'val-green' : 'val-red'}>
-            {connected ? 'GATEWAY ONLINE' : 'GATEWAY OFFLINE'}
+          <span style={{ fontSize: '11px', color: connected ? '#3fb950' : '#f85149', fontWeight: 500 }}>
+            {connected ? 'Gateway Connected' : 'Offline'}
           </span>
         </div>
       </div>
 
-      {/* Center: live stats */}
-      <div className="flex items-center gap-0">
-        <div className="ticker-item">
-          <span className="val-dim">AGENTS</span>
-          <span className="val-blue font-bold">{agents.length}</span>
-        </div>
-        <div className="ticker-item">
-          <span className="val-dim">ACTIVE</span>
-          <span className="val-green font-bold">{activeCount}</span>
-        </div>
-        {idleCount > 0 && (
-          <div className="ticker-item">
-            <span className="val-dim">IDLE</span>
-            <span className="val-yellow font-bold">{idleCount}</span>
+      {/* Center stats */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        {[
+          { label: 'Agents', value: agents.length, color: '#8b949e' },
+          { label: 'Active', value: activeCount, color: '#3fb950' },
+          { label: 'Sessions', value: totalSessions, color: '#58a6ff' },
+        ].map(({ label, value, color }, i) => (
+          <div
+            key={label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 12px',
+              borderRight: i < 2 ? '1px solid #30363d' : 'none',
+            }}
+          >
+            <span style={{ fontSize: '11px', color: '#4d5566' }}>{label}</span>
+            <span className="mono" style={{ fontSize: '13px', fontWeight: 600, color }}>{value}</span>
           </div>
-        )}
-        <div className="ticker-item">
-          <span className="val-dim">SESSIONS</span>
-          <span className="val-cyan font-bold">{totalSessions}</span>
-        </div>
-        {lastRefresh && (
-          <div className="ticker-item">
-            <span className="val-dim">SYNC</span>
-            <span className="val-dim">{lastRefresh.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-          </div>
-        )}
+        ))}
       </div>
 
-      {/* Right: clock */}
-      <div className="flex items-center gap-4">
+      {/* Right */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {lastRefresh && (
+          <span style={{ fontSize: '11px', color: '#4d5566' }}>
+            synced {lastRefresh.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+        )}
         <Clock />
       </div>
     </div>

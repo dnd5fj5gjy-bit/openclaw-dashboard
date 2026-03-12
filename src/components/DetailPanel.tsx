@@ -7,33 +7,43 @@ interface Props {
   agents: AgentInfo[];
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  nexus: '#4dabf7',
-  junior: '#22d3ee',
-  bgv: '#00d97e',
+const AGENT_META: Record<string, { icon: string; color: string; role: string }> = {
+  nexus:  { icon: '⬡', color: '#58a6ff', role: 'Tech Lead' },
+  junior: { icon: '◈', color: '#39d3c3', role: 'Team Lead' },
+  bgv:    { icon: '◉', color: '#3fb950', role: 'BGV Agent' },
 };
 
-function agentColor(name: string): string {
-  return AGENT_COLORS[name?.toLowerCase()] || '#c8d8f0';
-}
+const STATUS_CONFIG = {
+  active:  { color: '#3fb950', label: 'Active',  bg: '#1a4427' },
+  idle:    { color: '#e3b341', label: 'Idle',    bg: '#3a2e00' },
+  offline: { color: '#4d5566', label: 'Offline', bg: '#21262d' },
+};
 
 function formatTimestamp(ms: number): string {
   if (!ms) return 'Unknown';
   return new Date(ms).toLocaleString('en-US', {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
+    month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   });
 }
 
-function Row({ label, value, color }: { label: string; value: string; color?: string }) {
+function formatAgo(ms: number): string {
+  if (!ms) return 'never';
+  const mins = Math.floor((Date.now() - ms) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ago`;
+}
+
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="flex justify-between items-start py-1 border-b border-terminal-border" style={{ fontSize: '10px' }}>
-      <span className="val-dim uppercase tracking-wide">{label}</span>
-      <span style={{ color: color || '#c8d8f0', textAlign: 'right', maxWidth: '60%', wordBreak: 'break-all' }}>
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '7px 0', borderBottom: '1px solid #21262d',
+    }}>
+      <span style={{ fontSize: '11px', color: '#4d5566' }}>{label}</span>
+      <span className="mono" style={{ fontSize: '12px', color: color || '#e6edf3', fontWeight: 500 }}>
         {value}
       </span>
     </div>
@@ -41,59 +51,63 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
 }
 
 function AgentDetail({ agent, sessions }: { agent: AgentInfo; sessions: SessionRow[] }) {
-  const color = agentColor(agent.name);
+  const meta = AGENT_META[agent.name.toLowerCase()] || { icon: '◌', color: '#8b949e', role: 'Agent' };
+  const sc = STATUS_CONFIG[agent.status] || STATUS_CONFIG.offline;
   const agentSessions = sessions.filter(s => s.agentName === agent.name);
-  const STATUS_COLORS = { active: '#00d97e', idle: '#ffc107', offline: '#4a5568' };
-  const statusColor = STATUS_COLORS[agent.status] || '#4a5568';
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <span style={{ color, fontSize: '18px' }}>◈</span>
-        <div>
-          <div className="font-bold uppercase tracking-widest" style={{ color, fontSize: '13px' }}>
-            {agent.name}
-          </div>
-          <div style={{ fontSize: '9px', color: statusColor, letterSpacing: '0.1em' }}>
-            ● {agent.status.toUpperCase()}
+      {/* Agent hero */}
+      <div style={{
+        background: '#1c2128', borderRadius: '8px', padding: '16px', marginBottom: '16px',
+        border: '1px solid #30363d',
+        borderLeft: `4px solid ${meta.color}`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+          <span style={{ fontSize: '22px', color: meta.color }}>{meta.icon}</span>
+          <div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3', textTransform: 'capitalize' }}>
+              {agent.name}
+            </div>
+            <div style={{ fontSize: '11px', color: '#4d5566' }}>{meta.role}</div>
           </div>
         </div>
+        <span className="badge" style={{ color: sc.color, background: sc.bg }}>
+          <span className="dot" style={{ background: sc.color, width: '5px', height: '5px' }} />
+          {sc.label}
+        </span>
       </div>
 
-      <Row label="Sessions" value={String(agent.sessionCount)} color="#22d3ee" />
-      <Row label="Last Active" value={agent.lastActiveAgo} color={statusColor} />
-      <Row
-        label="Last Seen"
-        value={agent.lastActive > 0 ? formatTimestamp(agent.lastActive) : 'Never'}
-        color="#4a5568"
-      />
+      <Stat label="Sessions" value={String(agentSessions.length)} color="#58a6ff" />
+      <Stat label="Last active" value={formatAgo(agent.lastActive)} color={sc.color} />
+      <Stat label="Last seen" value={formatTimestamp(agent.lastActive)} />
+      <Stat label="Direct" value={String(agentSessions.filter(s => s.kind === 'direct').length)} />
+      <Stat label="Group" value={String(agentSessions.filter(s => s.kind === 'group').length)} />
 
       {agentSessions.length > 0 && (
-        <div className="mt-4">
-          <div className="val-dim uppercase text-xs tracking-wide mb-2" style={{ fontSize: '9px' }}>
+        <div style={{ marginTop: '16px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 600, color: '#4d5566', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
             Recent Sessions
           </div>
-          {agentSessions.slice(0, 8).map(s => (
-            <div
-              key={s.key}
-              className="py-1.5 border-b border-terminal-border"
-              style={{ fontSize: '10px' }}
-            >
-              <div className="flex justify-between mb-0.5">
-                <span
-                  style={{
-                    color: s.kind === 'group' ? '#fb923c' : '#4dabf7',
-                    fontSize: '9px',
-                    letterSpacing: '0.06em',
-                  }}
-                >
-                  {s.kind === 'group' ? '◉ GRP' : '◈ DM'}
+          {agentSessions.slice(0, 6).map(s => (
+            <div key={s.key} style={{
+              padding: '8px 0', borderBottom: '1px solid #21262d',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <div>
+                <span style={{
+                  fontSize: '10px', fontWeight: 600,
+                  color: s.kind === 'group' ? '#f0883e' : '#58a6ff',
+                  background: s.kind === 'group' ? '#3d1f00' : '#1a2f4d',
+                  padding: '1px 6px', borderRadius: '3px', marginRight: '6px',
+                }}>
+                  {s.kind === 'group' ? 'GRP' : 'DM'}
                 </span>
-                <span className="val-dim">{s.ageLabel}</span>
+                <span style={{ fontSize: '11px', color: '#8b949e' }}>
+                  {s.channel === 'telegram' ? 'Telegram' : s.channel}
+                </span>
               </div>
-              <div className="val-dim" style={{ fontSize: '9px', wordBreak: 'break-all' }}>
-                {s.key.split(':').slice(2).join(':').slice(0, 35)}
-              </div>
+              <span className="mono" style={{ fontSize: '10px', color: '#4d5566' }}>{s.ageLabel}</span>
             </div>
           ))}
         </div>
@@ -103,48 +117,58 @@ function AgentDetail({ agent, sessions }: { agent: AgentInfo; sessions: SessionR
 }
 
 function SessionDetail({ session }: { session: SessionRow }) {
-  const color = agentColor(session.agentName);
+  const meta = AGENT_META[session.agentName?.toLowerCase()] || { icon: '◌', color: '#8b949e', role: 'Agent' };
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <span style={{ color, fontSize: '14px' }}>◈</span>
-        <div>
-          <div className="font-bold uppercase" style={{ color, fontSize: '11px' }}>
-            {session.agentName}
+      <div style={{
+        background: '#1c2128', borderRadius: '8px', padding: '14px', marginBottom: '16px',
+        border: '1px solid #30363d',
+        borderLeft: `4px solid ${meta.color}`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+          <span style={{ fontSize: '18px', color: meta.color }}>{meta.icon}</span>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#e6edf3', textTransform: 'capitalize' }}>
+              {session.agentName}
+            </div>
+            <div style={{ fontSize: '10px', color: '#4d5566' }}>Session Detail</div>
           </div>
-          <div style={{ fontSize: '9px', color: '#4a5568' }}>Session Detail</div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: '10px', fontWeight: 600,
+            color: session.kind === 'group' ? '#f0883e' : '#58a6ff',
+            background: session.kind === 'group' ? '#3d1f00' : '#1a2f4d',
+            padding: '2px 8px', borderRadius: '4px',
+          }}>
+            {session.kind === 'group' ? 'Group' : 'Direct Message'}
+          </span>
+          <span style={{
+            fontSize: '10px', color: '#8b949e',
+            background: '#21262d', padding: '2px 8px', borderRadius: '4px',
+          }}>
+            {session.channel}
+          </span>
         </div>
       </div>
 
-      <Row label="Type" value={session.kind.toUpperCase()} color={session.kind === 'group' ? '#fb923c' : '#4dabf7'} />
-      <Row label="Channel" value={session.channel.toUpperCase()} />
-      <Row label="Chat Type" value={session.chatType.toUpperCase()} />
-      <Row label="From" value={session.from || 'N/A'} />
-      <Row label="Age" value={session.ageLabel} />
-      <Row label="Last Active" value={formatTimestamp(session.updatedAt)} color="#4a5568" />
+      <Stat label="Age" value={session.ageLabel} color="#e3b341" />
+      <Stat label="Chat type" value={session.chatType} />
+      <Stat label="Channel" value={session.channel} />
+      <Stat label="From" value={session.from || 'N/A'} />
+      <Stat label="Last active" value={formatTimestamp(session.updatedAt)} />
 
-      <div className="mt-4">
-        <div className="val-dim uppercase text-xs tracking-wide mb-2" style={{ fontSize: '9px' }}>
+      <div style={{ marginTop: '16px' }}>
+        <div style={{ fontSize: '10px', fontWeight: 600, color: '#4d5566', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
           Session Key
         </div>
-        <div
-          className="p-2 border border-terminal-border val-dim"
-          style={{ fontSize: '9px', wordBreak: 'break-all', background: '#04060e', lineHeight: '1.6' }}
-        >
+        <div className="mono" style={{
+          background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px',
+          padding: '10px', fontSize: '10px', color: '#4d5566',
+          wordBreak: 'break-all', lineHeight: '1.6',
+        }}>
           {session.key}
-        </div>
-      </div>
-
-      <div className="mt-3">
-        <div className="val-dim uppercase text-xs tracking-wide mb-2" style={{ fontSize: '9px' }}>
-          Session ID
-        </div>
-        <div
-          className="p-2 border border-terminal-border val-dim"
-          style={{ fontSize: '9px', wordBreak: 'break-all', background: '#04060e', lineHeight: '1.6' }}
-        >
-          {session.sessionId}
         </div>
       </div>
     </div>
@@ -156,11 +180,11 @@ export default function DetailPanel({ selectedSession, selectedAgent, sessions, 
   const agent = selectedAgent ? agents.find(a => a.name === selectedAgent) : null;
 
   return (
-    <div className="panel h-full flex flex-col">
+    <div className="panel h-full">
       <div className="panel-header">
-        <span className="panel-header-title">Detail</span>
-        <span className="val-dim">
-          {session ? 'SESSION' : agent ? 'AGENT' : 'SELECT ROW'}
+        <span className="panel-title">Detail</span>
+        <span style={{ fontSize: '11px', color: '#4d5566' }}>
+          {session ? 'Session' : agent ? 'Agent' : 'Select a row'}
         </span>
       </div>
 
@@ -170,12 +194,10 @@ export default function DetailPanel({ selectedSession, selectedAgent, sessions, 
         ) : agent ? (
           <AgentDetail agent={agent} sessions={sessions} />
         ) : (
-          <div className="text-center py-12 val-dim" style={{ fontSize: '11px' }}>
-            <div className="mb-2" style={{ fontSize: '20px' }}>◌</div>
-            <div>Click an agent or session</div>
-            <div className="mt-1" style={{ fontSize: '9px', letterSpacing: '0.05em' }}>
-              to view details
-            </div>
+          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#4d5566' }}>
+            <div style={{ fontSize: '28px', marginBottom: '12px', opacity: 0.5 }}>◌</div>
+            <div style={{ fontSize: '13px', marginBottom: '6px', color: '#8b949e' }}>Nothing selected</div>
+            <div style={{ fontSize: '11px' }}>Click an agent card or session row to drill in</div>
           </div>
         )}
       </div>

@@ -12,6 +12,7 @@ import path from 'path';
 
 const AGENTS_DIR = '/Users/bgvai/.openclaw/agents';
 const COMMS_LOG = '/Users/bgvai/.openclaw/workspace-nexus/agent-comms.jsonl';
+const TASKS_LOG = '/Users/bgvai/.openclaw/workspace-nexus/agent-tasks.jsonl';
 const POLL_INTERVAL_MS = 5000;
 
 interface RawSession {
@@ -184,6 +185,72 @@ function main() {
     if (agent) sessions = sessions.filter(s => s.agentName === agent);
     res.json(sessions.slice(0, limit));
   });
+
+  // ── TASK ENDPOINTS ────────────────────────────────────────────
+
+  function readTasks() {
+    if (!fs.existsSync(TASKS_LOG)) return [];
+    return fs.readFileSync(TASKS_LOG, 'utf8')
+      .split('\n').filter(l => l.trim())
+      .map(l => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(Boolean);
+  }
+
+  // GET /api/tasks
+  app.get('/api/tasks', (_req: Request, res: Response) => {
+    try { res.json(readTasks()); } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+
+  // POST /api/tasks — create or update a task
+  app.post('/api/tasks', (req: Request, res: Response) => {
+    try {
+      const task = req.body as {
+        id?: string; agent: string; title: string; description?: string;
+        status: string; tags?: string[];
+      };
+      if (!task.agent || !task.title || !task.status) {
+        return res.status(400).json({ error: 'agent, title, status required' });
+      }
+      const tasks = readTasks();
+      const existing = task.id ? tasks.findIndex((t: any) => t.id === task.id) : -1;
+      const now = Date.now();
+
+      if (existing >= 0) {
+        // Update: rewrite whole file
+        tasks[existing] = { ...tasks[existing], ...task, updatedAt: now,
+          completedAt: task.status === 'done' ? now : tasks[existing].completedAt };
+        fs.writeFileSync(TASKS_LOG, tasks.map((t: any) => JSON.stringify(t)).join('\n') + '\n');
+        return res.json({ ok: true, id: tasks[existing].id });
+      }
+
+      const entry = {
+        id: task.id || `task-${task.agent}-${now}`,
+        agent: task.agent, title: task.title,
+        description: task.description || '', status: task.status,
+        startedAt: now, updatedAt: now,
+        completedAt: task.status === 'done' ? now : null,
+        tags: task.tags || [],
+      };
+      fs.appendFileSync(TASKS_LOG, JSON.stringify(entry) + '\n');
+      res.json({ ok: true, id: entry.id });
+    } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+
+  // PATCH /api/tasks/:id — update status
+  app.patch('/api/tasks/:id', (req: Request, res: Response) => {
+    try {
+      const tasks = readTasks();
+      const idx = tasks.findIndex((t: any) => t.id === req.params.id);
+      if (idx < 0) return res.status(404).json({ error: 'Task not found' });
+      const now = Date.now();
+      tasks[idx] = { ...tasks[idx], ...req.body, updatedAt: now,
+        completedAt: req.body.status === 'done' ? now : tasks[idx].completedAt };
+      fs.writeFileSync(TASKS_LOG, tasks.map((t: any) => JSON.stringify(t)).join('\n') + '\n');
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+
+  // ── CHAT ENDPOINTS ─────────────────────────────────────────────
 
   // GET /api/chat — read last N messages from shared comms log
   app.get('/api/chat', (_req: Request, res: Response) => {
