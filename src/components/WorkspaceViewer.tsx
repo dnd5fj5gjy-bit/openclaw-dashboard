@@ -167,7 +167,7 @@ function WorkspaceViewer() {
         )}
 
         {/* Quick actions for folders */}
-        {selectedNode.type === 'folder' && !selectedNode.children?.length ? (
+        {selectedNode.type === 'folder' && !selectedNode.children?.length && (
           <div className="mt-4 p-4 bg-blue-900/20 rounded-lg text-sm">
             <h3 className="font-semibold mb-2">📁 Empty Folder</h3>
             <p>This folder has no files. You can create new content here if needed.</p>

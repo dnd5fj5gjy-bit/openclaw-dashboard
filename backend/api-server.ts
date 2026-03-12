@@ -1,301 +1,213 @@
 /**
- * REST API Server for Dashboard Integration
- * Uses OpenClaw tool invocations to fetch live session data
- * Polls every 5 seconds and exposes /api endpoints
+ * OpenClaw Dashboard API Server
+ * Reads live data directly from OpenClaw agent session files on disk
+ * Polls every 5 seconds and exposes REST endpoints
  */
 
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 
-// State management (in-memory cache)
-let cachedSessions: Array<{
-  session_id: string;
-  agent_name: string;
-  status: string;
-  created_at: string;
-}> = [];
+const AGENTS_DIR = '/Users/bgvai/.openclaw/agents';
+const POLL_INTERVAL_MS = 5000;
 
-let cachedTasks: Array<{
-  id: string;
-  title: string;
-  status: string;
-  agent: string;
-  description: string;
+interface RawSession {
+  key: string;
+  agentName: string;
   sessionId: string;
-  createdAt: string;
-}> = [];
+  updatedAt: number;
+  chatType: string;
+  channel: string;
+  from: string;
+  kind: string;
+}
 
-// Polling configuration
-const POLL_INTERVAL_MS = 5000; // 5 seconds
+interface AgentInfo {
+  name: string;
+  status: 'active' | 'idle' | 'offline';
+  sessionCount: number;
+  lastActive: number;
+  lastActiveAgo: string;
+}
+
+interface SessionRow {
+  key: string;
+  agentName: string;
+  sessionId: string;
+  updatedAt: number;
+  ageLabel: string;
+  chatType: string;
+  channel: string;
+  from: string;
+  kind: string;
+}
+
+let cachedAgents: AgentInfo[] = [];
+let cachedSessions: SessionRow[] = [];
 let lastPollTime = Date.now();
-let pollingTimeout: NodeJS.Timeout | null = null;
+let pollCount = 0;
 
-/**
- * Simulate OpenClaw tool invocation (in production, this would invoke actual tools)
- * For now, we'll fetch from the local OpenClaw gateway if available
- */
-async function fetchOpenClawSessions() {
-  try {
-    // Try to call OpenClaw sessions_list via HTTP gateway endpoint
-    const response = await fetch('http://localhost:7891/api/sessions_list', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    
-    if (response.ok) {
-      return await response.json();
-    }
-  } catch (error) {
-    console.log('Gateway API not available, using mock data');
-  }
-  
-  // Fallback to mock data based on your known agents
-  return [
-    {
-      session_id: 'agent:nexus',
-      agent_name: 'nexus',
-      status: 'running',
-      created_at: '2026-03-12T06:00:00Z'
-    },
-    {
-      session_id: 'agent:junior',
-      agent_name: 'junior',
-      status: 'running',
-      created_at: '2026-03-12T06:05:00Z'
-    },
-    {
-      session_id: 'agent:bgv',
-      agent_name: 'bgv',
-      status: 'paused',
-      created_at: '2026-03-12T06:10:00Z'
-    }
-  ];
+function formatAgo(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 0) return 'just now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d`;
 }
 
-/**
- * Fetch task details for a session using sessions_history tool
- */
-async function fetchSessionHistory(sessionId: string) {
-  try {
-    const response = await fetch('http://localhost:7891/api/sessions_history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionKey: sessionId, limit: 50 })
-    });
-    
-    if (response.ok) {
-      return await response.json();
-    }
-  } catch (error) {
-    // Fallback mock data
-  }
-  
-  // Mock task list for demo
-  return [
-    {
-      task_id: 'task-001',
-      action: 'analyze_codebase',
-      description: 'Analyze code structure and dependencies',
-      timestamp: new Date().toISOString(),
-      status: 'success'
-    },
-    {
-      task_id: 'task-002',
-      action: 'update_documentation',
-      description: 'Update memory files with latest changes',
-      timestamp: new Date().toISOString(),
-      status: 'running'
-    }
-  ];
+function getAgentStatus(lastActive: number, sessionCount: number): 'active' | 'idle' | 'offline' {
+  if (sessionCount === 0) return 'offline';
+  const ageMinutes = (Date.now() - lastActive) / 60000;
+  if (ageMinutes < 60) return 'active';
+  if (ageMinutes < 480) return 'idle';
+  return 'offline';
 }
 
-/**
- * Main polling function to fetch live data from OpenClaw
- */
-async function pollOpenClawData() {
-  console.log('🔄 Polling OpenClaw sessions...');
-  
-  const sessions = await fetchOpenClawSessions();
-  
-  // Update cached sessions
-  cachedSessions = sessions.map(session => ({
-    session_id: session.session_id,
-    agent_name: session.agent_name,
-    status: session.status || 'running',
-    created_at: session.created_at || new Date().toISOString()
-  }));
-  
-  // Fetch tasks for each running session
-  const allTasks: any[] = [];
-  
-  for (const session of sessions) {
-    if (session.status === 'running') {
+function loadAgentData(agentName: string): { sessions: RawSession[] } {
+  try {
+    const sessionsFile = path.join(AGENTS_DIR, agentName, 'sessions', 'sessions.json');
+    if (!fs.existsSync(sessionsFile)) return { sessions: [] };
+
+    const raw = JSON.parse(fs.readFileSync(sessionsFile, 'utf8')) as Record<string, any>;
+    const sessions: RawSession[] = [];
+
+    for (const [key, data] of Object.entries(raw)) {
+      if (!data || typeof data !== 'object') continue;
+
+      // Determine kind from key
+      const kind = key.includes(':group:') ? 'group' : 'direct';
+
+      // Extract readable "from" label
+      let fromLabel = data.origin?.from || data.lastTo || key;
+      // Shorten for display
+      if (fromLabel.includes(':')) {
+        const parts = fromLabel.split(':');
+        fromLabel = parts[parts.length - 1];
+      }
+
+      sessions.push({
+        key,
+        agentName,
+        sessionId: data.sessionId || key,
+        updatedAt: data.updatedAt || 0,
+        chatType: data.chatType || data.origin?.chatType || kind,
+        channel: data.lastChannel || data.origin?.provider || 'internal',
+        from: fromLabel,
+        kind,
+      });
+    }
+
+    return { sessions: sessions.sort((a, b) => b.updatedAt - a.updatedAt) };
+  } catch (err) {
+    console.error(`Error reading ${agentName}:`, (err as Error).message);
+    return { sessions: [] };
+  }
+}
+
+async function pollData() {
+  try {
+    if (!fs.existsSync(AGENTS_DIR)) {
+      console.warn('⚠️  Agents dir not found:', AGENTS_DIR);
+      return;
+    }
+
+    const agentDirs = fs.readdirSync(AGENTS_DIR).filter(d => {
       try {
-        const history = await fetchSessionHistory(session.session_id);
-        
-        const sessionTasks = history.map((entry: any, idx: number) => ({
-          id: `task-${session.session_id}-${idx}`,
-          title: entry.action?.replace(/_/g, ' ') || 'Unknown action',
-          status: mapTaskStatus(entry.status),
-          agent: session.agent_name,
-          description: entry.description || 'No description available',
-          sessionId: session.session_id,
-          createdAt: new Date(entry.timestamp).toISOString(),
-        }));
-        
-        allTasks.push(...sessionTasks);
-      } catch (error) {
-        console.error(`Error fetching tasks for ${session.session_id}:`, error);
+        return fs.statSync(path.join(AGENTS_DIR, d)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+
+    const agents: AgentInfo[] = [];
+    const allSessions: SessionRow[] = [];
+
+    for (const agentName of agentDirs) {
+      const { sessions } = loadAgentData(agentName);
+      const lastActive = sessions.length > 0 ? sessions[0].updatedAt : 0;
+      const status = getAgentStatus(lastActive, sessions.length);
+
+      agents.push({
+        name: agentName,
+        status,
+        sessionCount: sessions.length,
+        lastActive,
+        lastActiveAgo: lastActive > 0 ? formatAgo(lastActive) : 'never',
+      });
+
+      for (const s of sessions) {
+        allSessions.push({
+          ...s,
+          ageLabel: s.updatedAt > 0 ? formatAgo(s.updatedAt) : 'unknown',
+        });
       }
     }
+
+    // Sort sessions by most recent first
+    allSessions.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    cachedAgents = agents.sort((a, b) => b.lastActive - a.lastActive);
+    cachedSessions = allSessions;
+    lastPollTime = Date.now();
+    pollCount++;
+
+    const totalSessions = allSessions.length;
+    const activeAgents = agents.filter(a => a.status === 'active').length;
+    console.log(`✅ [poll #${pollCount}] ${agents.length} agents (${activeAgents} active), ${totalSessions} sessions`);
+  } catch (err) {
+    console.error('Poll error:', (err as Error).message);
   }
-  
-  cachedTasks = allTasks;
-  lastPollTime = Date.now();
-  
-  console.log(`✅ Updated: ${cachedSessions.length} sessions, ${allTasks.length} tasks`);
 }
 
-/**
- * Map OpenClaw status to Kanban column names
- */
-function mapTaskStatus(status: string): string {
-  const statusMap: Record<string, string> = {
-    'success': 'done',
-    'failed': 'review',
-    'running': 'in-progress',
-    'pending': 'todo',
-    'paused': 'review',
-  };
-  return statusMap[status] || 'todo';
-}
-
-/**
- * Create REST API Express server
- */
-function createRestApiServer(expressApp: Express) {
-  const apiRouter = express.Router();
-  
-  // Enable CORS
-  apiRouter.use(cors());
-  
-  // GET /api/sessions
-  apiRouter.get('/sessions', (_req: Request, res: Response) => {
-    res.json({ sessions: cachedSessions });
-  });
-  
-  // GET /api/tasks
-  apiRouter.get('/tasks', (_req: Request, res: Response) => {
-    res.json(cachedTasks);
-  });
-  
-  // GET /api/tasks/:taskId
-  apiRouter.get('/tasks/:taskId', (req: Request, res: Response) => {
-    const task = cachedTasks.find(t => t.id === req.params.taskId);
-    
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-    
-    // Mock audit trail for demo
-    res.json({
-      ...task,
-      auditTrail: [
-        {
-          time: new Date(task.createdAt).toISOString(),
-          action: task.title,
-          details: task.description
-        },
-        {
-          time: new Date().toISOString(),
-          action: 'status_change',
-          details: `Status updated to ${task.status}`
-        }
-      ]
-    });
-  });
-  
-  // POST /api/tasks/:taskId/pause
-  apiRouter.post('/tasks/:taskId/pause', (req: Request, res: Response) => {
-    const task = cachedTasks.find(t => t.id === req.params.taskId);
-    
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-    
-    console.log(`⏸️ Pausing task: ${task.id}`);
-    task.status = 'review';
-    
-    res.json({ success: true, message: `Paused task ${task.id}` });
-  });
-  
-  // POST /api/tasks/:taskId/resume
-  apiRouter.post('/tasks/:taskId/resume', (req: Request, res: Response) => {
-    const task = cachedTasks.find(t => t.id === req.params.taskId);
-    
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-    
-    console.log(`▶️ Resuming task: ${task.id}`);
-    task.status = 'in-progress';
-    
-    res.json({ success: true, message: `Resumed task ${task.id}` });
-  });
-  
-  // GET /api/health
-  apiRouter.get('/health', (_req: Request, res: Response) => {
-    const uptimeSeconds = Math.floor((Date.now() - lastPollTime) / 1000);
-    
-    res.json({
-      status: 'ok',
-      lastPollTime: lastPollTime,
-      activeSessions: cachedSessions.filter(s => s.status === 'running').length,
-      totalSessions: cachedSessions.length,
-      activeTasks: cachedTasks.filter(t => t.status === 'in-progress').length,
-      totalTasks: cachedTasks.length,
-    });
-  });
-  
-  expressApp.use('/api', apiRouter);
-}
-
-/**
- * Main entry point
- */
 function main() {
   const app = express();
-  const port = 7892; // Different from gateway to avoid conflicts
-  
   app.use(cors());
   app.use(express.json());
-  
-  createRestApiServer(app);
-  
-  const server = http.createServer(app);
-  
-  server.listen(port, () => {
-    console.log(`🚀 REST API server listening on http://localhost:${port}`);
-    console.log(`📡 Dashboard proxy should target http://localhost:${port}/api`);
-    
-    // Start polling immediately
-    pollOpenClawData();
-    
-    // Poll every 5 seconds
-    pollingTimeout = setInterval(pollOpenClawData, POLL_INTERVAL_MS);
+
+  // GET /api/agents
+  app.get('/api/agents', (_req: Request, res: Response) => {
+    res.json(cachedAgents);
   });
-  
-  // Handle graceful shutdown
-  process.on('SIGINT', () => {
-    console.log('\n🛑 Shutting down...');
-    if (pollingTimeout) {
-      clearInterval(pollingTimeout);
-    }
-    server.close(() => {
-      process.exit(0);
+
+  // GET /api/sessions
+  app.get('/api/sessions', (_req: Request, res: Response) => {
+    const limit = parseInt((_req.query.limit as string) || '100');
+    const agent = _req.query.agent as string | undefined;
+    let sessions = cachedSessions;
+    if (agent) sessions = sessions.filter(s => s.agentName === agent);
+    res.json(sessions.slice(0, limit));
+  });
+
+  // GET /api/health
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      lastPollTime,
+      pollCount,
+      agentsDir: AGENTS_DIR,
+      agents: cachedAgents.length,
+      sessions: cachedSessions.length,
+      activeAgents: cachedAgents.filter(a => a.status === 'active').length,
     });
+  });
+
+  const server = http.createServer(app);
+  const port = 7892;
+
+  server.listen(port, () => {
+    console.log(`🚀 Dashboard API on http://localhost:${port}`);
+    pollData();
+    setInterval(pollData, POLL_INTERVAL_MS);
+  });
+
+  process.on('SIGINT', () => {
+    server.close(() => process.exit(0));
   });
 }
 
