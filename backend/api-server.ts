@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 
 const AGENTS_DIR = '/Users/bgvai/.openclaw/agents';
+const COMMS_LOG = '/Users/bgvai/.openclaw/workspace-nexus/agent-comms.jsonl';
 const POLL_INTERVAL_MS = 5000;
 
 interface RawSession {
@@ -182,6 +183,54 @@ function main() {
     let sessions = cachedSessions;
     if (agent) sessions = sessions.filter(s => s.agentName === agent);
     res.json(sessions.slice(0, limit));
+  });
+
+  // GET /api/chat — read last N messages from shared comms log
+  app.get('/api/chat', (_req: Request, res: Response) => {
+    try {
+      if (!fs.existsSync(COMMS_LOG)) {
+        return res.json([]);
+      }
+      const lines = fs.readFileSync(COMMS_LOG, 'utf8')
+        .split('\n')
+        .filter(l => l.trim())
+        .map(l => {
+          try { return JSON.parse(l); } catch { return null; }
+        })
+        .filter(Boolean);
+      const limit = parseInt((_req.query.limit as string) || '100');
+      res.json(lines.slice(-limit).reverse()); // newest first
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // POST /api/chat — append a message to the shared comms log
+  app.post('/api/chat', (req: Request, res: Response) => {
+    try {
+      const { from, to, message, type } = req.body as {
+        from: string;
+        to: string;
+        message: string;
+        type?: string;
+      };
+      if (!from || !to || !message) {
+        return res.status(400).json({ error: 'from, to, message required' });
+      }
+      const entry = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        from,
+        to,
+        message,
+        type: type || 'message',
+        timestamp: Date.now(),
+      };
+      fs.appendFileSync(COMMS_LOG, JSON.stringify(entry) + '\n');
+      console.log(`💬 [${from}→${to}] ${message.slice(0, 60)}...`);
+      res.json({ ok: true, id: entry.id });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // GET /api/health

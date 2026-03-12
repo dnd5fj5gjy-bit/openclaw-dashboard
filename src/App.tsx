@@ -4,6 +4,7 @@ import StatusBar from './components/StatusBar';
 import AgentPanel from './components/AgentPanel';
 import SessionsTable from './components/SessionsTable';
 import DetailPanel from './components/DetailPanel';
+import ChatFeed from './components/ChatFeed';
 
 export default function App() {
   const { agents, sessions, health, connected, loading, lastRefresh } = useAgentData(5000);
@@ -54,39 +55,46 @@ export default function App() {
         </div>
       ) : (
         <div
-          className="flex-1 overflow-hidden"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '220px 1fr 240px',
-            gridTemplateRows: '1fr',
-            gap: '1px',
-            background: '#1a2035', // gap color = border
-            padding: '1px',
-          }}
+          className="flex-1 overflow-hidden flex flex-col"
+          style={{ gap: '1px', background: '#1a2035', padding: '1px' }}
         >
-          {/* Left: Agent panel */}
-          <AgentPanel
-            agents={agents}
-            sessions={sessions}
-            selectedAgent={selectedAgent}
-            onSelectAgent={handleSelectAgent}
-          />
+          {/* Top section: 3-panel grid */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '220px 1fr 240px',
+              gap: '1px',
+              flex: '1',
+              minHeight: 0,
+            }}
+          >
+            {/* Left: Agent panel */}
+            <AgentPanel
+              agents={agents}
+              sessions={sessions}
+              selectedAgent={selectedAgent}
+              onSelectAgent={handleSelectAgent}
+            />
 
-          {/* Center: Sessions table */}
-          <SessionsTable
-            sessions={sessions}
-            selectedSession={selectedSession}
-            selectedAgent={selectedAgent}
-            onSelectSession={handleSelectSession}
-          />
+            {/* Center: Sessions table */}
+            <SessionsTable
+              sessions={sessions}
+              selectedSession={selectedSession}
+              selectedAgent={selectedAgent}
+              onSelectSession={handleSelectSession}
+            />
 
-          {/* Right: Detail panel */}
-          <DetailPanel
-            selectedSession={selectedSession}
-            selectedAgent={selectedAgent}
-            sessions={sessions}
-            agents={agents}
-          />
+            {/* Right: Detail panel */}
+            <DetailPanel
+              selectedSession={selectedSession}
+              selectedAgent={selectedAgent}
+              sessions={sessions}
+              agents={agents}
+            />
+          </div>
+
+          {/* Bottom: Agent team channel */}
+          <ChatFeed />
         </div>
       )}
 
