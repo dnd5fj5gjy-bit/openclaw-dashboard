@@ -5,6 +5,6 @@
   "framework": "vite",
   "public": true,
   "env": {
-    "VITE_API_BACKEND_URL": "@vite-api-backend-url"
+    "VITE_API_BACKEND_URL": "@VITE_API_BACKEND_URL"
   }
 }
