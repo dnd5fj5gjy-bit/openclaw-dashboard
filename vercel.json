@@ -1,0 +1,10 @@
+{
+  "name": "openclaw-dashboard",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "public": true,
+  "env": {
+    "VITE_API_BACKEND_URL": "@vite-api-backend-url"
+  }
+}
