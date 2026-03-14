@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { SessionRow } from '../hooks/useAgentData';
 
 interface Props {
@@ -31,24 +32,61 @@ function truncateKey(key: string, max = 38): string {
 }
 
 export default function SessionsTable({ sessions, selectedSession, selectedAgent, onSelectSession }: Props) {
-  const filtered = selectedAgent
-    ? sessions.filter(s => s.agentName === selectedAgent)
-    : sessions;
+  const [channelFilter, setChannelFilter] = useState<string | null>(null);
+
+  // Get unique channels
+  const channels = Array.from(new Set(sessions.map(s => s.channel))).sort();
+
+  // Apply filters
+  const filtered = sessions.filter(s => {
+    if (selectedAgent && s.agentName !== selectedAgent) return false;
+    if (channelFilter && s.channel !== channelFilter) return false;
+    return true;
+  });
 
   return (
     <div className="panel h-full">
       <div className="panel-header">
         <span className="panel-title">Sessions</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Agent filter badge */}
           {selectedAgent && (
             <span style={{
               fontSize: '10px', fontWeight: 600, color: agentColor(selectedAgent),
               background: '#1a2f4d', padding: '2px 7px', borderRadius: '10px',
               textTransform: 'capitalize',
+              cursor: 'pointer',
+              opacity: 0.8,
+            }}
+            onClick={() => {
+              // Click to clear agent filter (controlled by parent)
             }}>
               {selectedAgent}
             </span>
           )}
+          
+          {/* Channel filter dropdown */}
+          <select
+            value={channelFilter || ''}
+            onChange={(e) => setChannelFilter(e.target.value || null)}
+            style={{
+              fontSize: '10px', fontWeight: 500, padding: '4px 8px',
+              background: '#1c2128', border: '1px solid #30363d',
+              color: channelFilter ? '#58a6ff' : '#8b949e',
+              borderRadius: '6px', cursor: 'pointer',
+            }}
+          >
+            <option value="">All channels</option>
+            {channels.map(ch => (
+              <option key={ch} value={ch}>
+                {ch === 'telegram' ? '📱 Telegram'
+                  : ch === 'discord' ? '💬 Discord'
+                  : ch === 'main' ? '💻 Main'
+                  : `📌 ${ch}`}
+              </option>
+            ))}
+          </select>
+
           <span className="panel-badge">{filtered.length}</span>
         </div>
       </div>
