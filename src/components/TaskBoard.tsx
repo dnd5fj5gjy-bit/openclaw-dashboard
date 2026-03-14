@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AgentTask } from '../hooks/useTasks';
 
 interface Props {
@@ -48,6 +49,25 @@ function TaskCard({ task }: { task: AgentTask }) {
   const meta = AGENT_META[task.agent.toLowerCase()] || { icon: '◌', color: '#8b949e' };
   const sc = STATUS_CONFIG[task.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.queued;
   const elapsed = task.status === 'active' ? formatAgo(task.startedAt) : null;
+  const [claiming, setClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+
+  const claimTask = async () => {
+    if (claiming) return;
+    setClaiming(true);
+    try {
+      await fetch(`/api/tasks/${encodeURIComponent(task.id)}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'nexus' }),
+      });
+      setClaimed(true);
+    } catch (err) {
+      console.error('Claim failed', err);
+    } finally {
+      setClaiming(false);
+    }
+  };
 
   return (
     <div className={`task-card status-${task.status} fade-in`}>
@@ -102,12 +122,27 @@ function TaskCard({ task }: { task: AgentTask }) {
         </div>
       )}
 
-      {/* Completed time */}
-      {task.status === 'done' && task.completedAt && (
-        <div style={{ marginTop: '6px', fontSize: '10px', color: '#4d5566' }}>
-          Completed {formatAgo(task.completedAt)}
-        </div>
-      )}
+      {/* Action row */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px', gap: '8px' }}>
+        {task.status === 'queued' && (
+          <button
+            onClick={claimTask}
+            disabled={claiming || claimed}
+            style={{
+              fontSize: '11px', fontWeight: 600,
+              color: claimed ? '#3fb950' : '#58a6ff',
+              background: 'none', border: '1px solid #30363d', padding: '6px 10px', borderRadius: '6px', cursor: claiming ? 'wait' : 'pointer'
+            }}
+          >
+            {claiming ? 'Claiming…' : claimed ? 'Claimed' : 'Claim'}
+          </button>
+        )}
+        {task.status === 'done' && task.completedAt && (
+          <div style={{ fontSize: '10px', color: '#4d5566' }}>
+            Completed {formatAgo(task.completedAt)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -182,15 +217,40 @@ function Column({
 }
 
 export default function TaskBoard({ tasks }: Props) {
+  const [showAllDone, setShowAllDone] = useState(false);
+
   const active = tasks.filter(t => t.status === 'active');
   const queued = tasks.filter(t => t.status === 'queued');
-  const done   = tasks.filter(t => t.status === 'done').slice(0, 10); // last 10
+  const done   = tasks.filter(t => t.status === 'done');
+  const displayDone = showAllDone ? done : done.slice(0, 10); // show 10 by default, all if expanded
 
   return (
     <div className="panel h-full" style={{ overflow: 'hidden' }}>
       <div className="panel-header">
         <span className="panel-title">Task Board</span>
-        <span className="panel-badge">{tasks.length} total</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="panel-badge">{tasks.length} total</span>
+          {done.length > 10 && (
+            <button
+              onClick={() => setShowAllDone(!showAllDone)}
+              style={{
+                fontSize: '10px', fontWeight: 600,
+                color: showAllDone ? '#3fb950' : '#4d5566',
+                background: 'none', border: 'none', cursor: 'pointer',
+                padding: '2px 6px', borderRadius: '4px',
+                transition: 'color 0.15s',
+              }}
+              onMouseOver={(e) => {
+                if (!showAllDone) (e.target as HTMLElement).style.color = '#58a6ff';
+              }}
+              onMouseOut={(e) => {
+                (e.target as HTMLElement).style.color = showAllDone ? '#3fb950' : '#4d5566';
+              }}
+            >
+              {showAllDone ? `Hide (${done.length} total)` : `Show all (${done.length})`}
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{
@@ -204,7 +264,7 @@ export default function TaskBoard({ tasks }: Props) {
       }}>
         <Column status="active" tasks={active} />
         <Column status="queued" tasks={queued} />
-        <Column status="done"   tasks={done} />
+        <Column status="done"   tasks={displayDone} />
       </div>
     </div>
   );
